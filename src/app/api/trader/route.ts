@@ -10,12 +10,13 @@ export async function GET(req: Request) {
   try {
     const res = await fetch(
       `${BASE}/v2/portfolio?blockchain_address=${encodeURIComponent(address)}`,
-      { next: { revalidate: 60 } }
+      { cache: "no-store" }
     );
-    if (!res.ok) {
-      return NextResponse.json({ error: `Strike returned ${res.status}` }, { status: res.status });
-    }
-    return NextResponse.json(await res.json());
+    const text = await res.text();
+    return new NextResponse(text, {
+      status: res.status,
+      headers: { "content-type": "application/json" },
+    });
   } catch {
     return NextResponse.json({ error: "Could not reach Strike" }, { status: 502 });
   }
