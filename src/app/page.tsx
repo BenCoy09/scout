@@ -1,202 +1,317 @@
 "use client";
-/* eslint-disable @typescript-eslint/no-explicit-any */
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { DEMO, DEMO_B, EXAMPLES, archetype, copyScore, load, usd, verdict, type Report } from "@/lib/scout";
 
-type Insight = { title: string; body: string; tone: "warn" | "good" };
-type Report = {
-  sample: boolean; pnl: number; fees: number; takerFees: number; rebates: number; savings: number;
-  winRate: number | null; liqs: number; avgLev: number; trades: number; spanDays: number; takerPct: number;
-  maxDD: number | null; curve: number[]; insights: Insight[];
-};
+const STEPS = [
+  { id: "t-verdict", title: "Trader type and verdict", body: "Scout reads the real fills and gives a plain-English type, plus a verdict on whether this wallet is realistic to copy." },
+  { id: "t-stats", title: "The key numbers", body: "Fills per day shows whether a human could follow it. Leverage and PnL come from the same sample of recent fills." },
+  { id: "t-chart", title: "Profit history", body: "This is Strike’s portfolio history, so you see the big drops, not just the latest day." },
+  { id: "t-fee", title: "Fee saver", body: "How much of the fees were taker fees, and a rough estimate of what limit orders could save." },
+];
 
-const n = (v: any) => { const x = parseFloat(v); return Number.isFinite(x) ? x : 0; };
-const usd = (v: number) => (v < 0 ? "-$" : "$") + Math.abs(v).toLocaleString(undefined, { maximumFractionDigits: 2 });
-const card = "rounded-2xl border border-[#1F2A2D] bg-[#131A1C] p-5";
-const avg = (a: number[]) => (a.length ? a.reduce((s, x) => s + x, 0) / a.length : 0);
-
-function buildReport(pf: any, fr: any): Report {
-  const fills: any[] = [...(fr?.fills ?? [])].sort((a, b) => a.timestamp - b.timestamp);
-  const fees = fills.reduce((s, f) => s + Math.max(n(f.fee), 0), 0);
-  const rebates = fills.reduce((s, f) => s + Math.max(-n(f.fee), 0), 0);
-  const takerFees = fills.filter((f) => f.role === "taker").reduce((s, f) => s + Math.max(n(f.fee), 0), 0);
-  const pnl = fills.reduce((s, f) => s + n(f.realized_pnl), 0);
-  const wins = fills.filter((f) => n(f.realized_pnl) > 0).length;
-  const losses = fills.filter((f) => n(f.realized_pnl) < 0).length;
-  const liqs = fills.filter((f) => f.auto_close_type === "liquidation").length;
-  const levs = fills.map((f) => n(f.leverage)).filter((l) => l > 0);
-  const half = Math.floor(levs.length / 2);
-  const hist: any[][] = pf?.history_perp_only ?? [];
-  const curve: number[] = hist.map((p) => n(p[2]) + n(p[3]));
-  const eq = n(hist.slice(-1)[0]?.[1]);
-  let peak = -Infinity, dd = 0;
-  for (const v of curve) {
-    if (v > peak) peak = v;
-    dd = Math.min(dd, v - peak);
-  }
-  const tier = (pf?.fee_tiers ?? []).find((t: any) => t.Tier === pf?.fee_tier);
-  const ratioRaw = tier && n(tier.TakerRate) > 0 ? 1 - n(tier.MakerRate) / n(tier.TakerRate) : 0;
-  const savings = takerFees * 0.25 * Math.min(Math.max(ratioRaw, 0), 2);
-  const spanDays = fills.length > 1 ? (fills[fills.length - 1].timestamp - fills[0].timestamp) / 86400000 : 0;
-  const perDay = fills.length / Math.max(spanDays, 1 / 24);
-  let revenge = 0;
-  for (let i = 0; i < fills.length - 1; i++) {
-    if (n(fills[i].realized_pnl) < 0) {
-      const next = fills.slice(i + 1, i + 6).find((f) => n(f.realized_pnl) === 0);
-      if (next && next.timestamp - fills[i].timestamp < 300000) revenge++;
-    }
-  }
-  const insights: Insight[] = [];
-  if (fills.length >= 500 && perDay > 300)
-    insights.push({ tone: "warn", title: "Looks like a bot or high-frequency trader", body: `About ${Math.round(perDay).toLocaleString()} fills per day in this sample. Copying a wallet like this is usually not realistic, because your copies would arrive after the trades.` });
-  if (fees > 0 && takerFees / fees > 0.6)
-    insights.push({ tone: "warn", title: "Most fees are taker fees", body: `About ${Math.round((takerFees / fees) * 100)}% of fees come from taker orders. Using limit orders more often could save roughly ${usd(savings)} (estimate).` });
-  if (revenge >= 3)
-    insights.push({ tone: "warn", title: "Possible revenge trades", body: `${revenge} times a new trade opened within 5 minutes of a losing close. Pausing after a loss may help.` });
-  if (half >= 5 && avg(levs.slice(half)) > avg(levs.slice(0, half)) * 1.25)
-    insights.push({ tone: "warn", title: "Leverage is creeping up", body: `Recent trades use about ${avg(levs.slice(half)).toFixed(1)}x vs ${avg(levs.slice(0, half)).toFixed(1)}x earlier.` });
-  if (liqs > 0)
-    insights.push({ tone: "warn", title: "Liquidations found", body: `${liqs} fill(s) in this sample were liquidations.` });
-  if (curve.length > 1 && eq > 0 && -dd > eq * 0.3)
-    insights.push({ tone: "warn", title: "Big drop from the profit peak", body: `Profit fell by about ${usd(-dd)} from its peak (estimate).` });
-  if (insights.length === 0)
-    insights.push({ tone: "good", title: "No red flags in this sample", body: "Nothing unusual showed up in the fills we checked." });
-  return {
-    sample: false, pnl, fees, takerFees, rebates, savings,
-    winRate: wins + losses > 0 ? wins / (wins + losses) : null,
-    liqs, avgLev: avg(levs), trades: fills.length, spanDays, takerPct: fills.length ? fills.filter((f) => f.role === "taker").length / fills.length : 0,
-    maxDD: curve.length > 1 ? dd : null, curve, insights,
-  };
+function Stat({ label, value, cls = "", small = false }: { label: string; value: string; cls?: string; small?: boolean }) {
+  return (
+    <div>
+      <div className="label">{label}</div>
+      <div className={`num mt-1 font-semibold ${small ? "text-lg" : "text-2xl"} ${cls}`}>{value}</div>
+    </div>
+  );
 }
 
-const DEMO: Report = {
-  sample: true, pnl: 1840.5, fees: 412.3, takerFees: 301.2, rebates: 22.4, savings: 38.6,
-  winRate: 0.61, liqs: 0, avgLev: 6.4, trades: 142, spanDays: 21, takerPct: 0.7, maxDD: -240,
-  curve: [0, 40, 120, 5, 90, 210, 180, 330, 420, 500],
-  insights: [
-    { tone: "warn", title: "Most fees are taker fees", body: "About 73% of fees come from taker orders. Using limit orders more often could save roughly $38.60 (estimate)." },
-    { tone: "warn", title: "Possible revenge trades", body: "4 times a new trade opened within 5 minutes of a losing close. Pausing after a loss may help." },
-  ],
-};
+function Spark({ curve, h = "h-40", fill = false }: { curve: number[]; h?: string; fill?: boolean }) {
+  if (curve.length < 2) return null;
+  const lo = Math.min(...curve);
+  const span = Math.max(...curve) - lo || 1;
+  const pts = curve.map((x, i) => `${(i / (curve.length - 1)) * 320},${110 - ((x - lo) / span) * 100}`).join(" ");
+  return (
+    <svg viewBox="0 0 320 120" preserveAspectRatio="none" className={`${h} w-full`} role="img" aria-label="Profit over time">
+      {fill && <polygon points={`0,120 ${pts} 320,120`} fill="rgba(198,255,77,0.12)"></polygon>}
+      <polyline points={pts} fill="none" stroke="#C6FF4D" strokeWidth="2.5" strokeLinejoin="round" vectorEffect="non-scaling-stroke"></polyline>
+    </svg>
+  );
+}
 
-async function load(addr: string) {
-  const get = async (path: string) => {
-    const res = await fetch(`/api/strike?path=${path}&address=${encodeURIComponent(addr)}`);
-    const text = await res.text();
-    if (!res.ok) throw new Error(`Strike returned ${res.status}: ${text.slice(0, 120)}`);
-    return JSON.parse(text);
-  };
-  const [pf, fr] = await Promise.all([get("portfolio"), get("fills")]);
-  return buildReport(pf, fr);
+function Side({ tag, r }: { tag: string; r: Report }) {
+  const [t, tl] = archetype(r);
+  const v = verdict(r);
+  const sc = copyScore(r);
+  return (
+    <div className="panel rise flex flex-col gap-4 p-5">
+      <p className="label">{tag}{r.sample ? " · sample data" : ""}</p>
+      <div>
+        <h3 className="text-3xl font-bold tracking-tight">{t}</h3>
+        <p className="muted mt-1 text-sm">{tl}</p>
+      </div>
+      <p className={`font-bold ${v.tone}`}>{v.label}</p>
+      <div className="grid grid-cols-2 gap-4 pt-4" style={{ borderTop: "1px solid var(--line)" }}>
+        <Stat small label="Copyability" value={sc + "/100"} cls={sc >= 70 ? "acid" : sc >= 40 ? "warn" : "bad"} />
+        <Stat small label="Fills per day" value={r.perDay ? Math.round(r.perDay).toLocaleString() : "n/a"} />
+        <Stat small label="Avg leverage" value={r.avgLev ? r.avgLev.toFixed(1) + "x" : "n/a"} />
+        <Stat small label="Win rate" value={r.winRate === null ? "n/a" : Math.round(r.winRate * 100) + "%"} />
+        <Stat small label="Realized PnL (sample)" value={usd(r.pnl)} cls={r.pnl >= 0 ? "acid" : "bad"} />
+        <Stat small label="Biggest profit drop" value={r.maxDD === null ? "n/a" : usd(r.maxDD)} cls="warn" />
+      </div>
+      <Spark curve={r.curve} fill />
+      <ul className="muted list-disc pl-5 text-sm">
+        {r.insights.map((i) => <li key={i.title}>{i.title}</li>)}
+      </ul>
+    </div>
+  );
 }
 
 export default function Home() {
+  const [mode, setMode] = useState<"scan" | "compare">("scan");
   const [addr, setAddr] = useState("");
   const [ref, setRef] = useState("");
   const [r, setR] = useState<Report | null>(null);
+  const [ca, setCa] = useState("");
+  const [cb, setCb] = useState("");
+  const [pair, setPair] = useState<[Report, Report] | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [copied, setCopied] = useState(false);
+  const [tour, setTour] = useState(-1);
 
-  async function analyze() {
-    if (!addr.trim()) return;
+  useEffect(() => {
+    document.querySelectorAll(".tour-ring").forEach((e) => e.classList.remove("tour-ring"));
+    if (tour < 0) return;
+    const el = document.getElementById(STEPS[tour].id);
+    if (el) {
+      el.classList.add("tour-ring");
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }, [tour]);
+
+  function endTour() {
+    try { localStorage.setItem("scout_tour", "1"); } catch {}
+    setTour(-1);
+  }
+
+  function switchMode(m: "scan" | "compare") {
+    setMode(m); setErr(""); setTour(-1);
+  }
+
+  async function analyze(a: string = addr) {
+    if (!a.trim()) return;
     setBusy(true); setErr(""); setCopied(false);
-    try { setR(await load(addr.trim())); }
-    catch (e) { setErr(e instanceof Error ? e.message : "Something went wrong"); }
+    try {
+      const rep = await load(a.trim());
+      setR(rep);
+      let seen = false;
+      try { seen = localStorage.getItem("scout_tour") === "1"; } catch {}
+      if (!seen) setTour(0);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Something went wrong");
+    }
     setBusy(false);
   }
 
+  async function compare(a: string = ca, b: string = cb) {
+    if (!a.trim() || !b.trim()) { setErr("Enter two wallets to compare."); return; }
+    setBusy(true); setErr(""); setPair(null);
+    const [x, y] = await Promise.allSettled([load(a.trim()), load(b.trim())]);
+    if (x.status === "fulfilled" && y.status === "fulfilled") setPair([x.value, y.value]);
+    else {
+      const bad = x.status !== "fulfilled" ? x : (y as PromiseRejectedResult);
+      const reason = bad.reason instanceof Error ? bad.reason.message : "Something went wrong";
+      setErr(`Could not load wallet ${x.status !== "fulfilled" ? "A" : "B"}: ${reason}`);
+    }
+    setBusy(false);
+  }
+
+  const [type, tagline] = r ? archetype(r) : ["", ""];
+  const v = r ? verdict(r) : null;
+
   async function share() {
-    if (!r) return;
-    const text = `My Strike report from Scout: ${r.trades} fills, realized PnL ${usd(r.pnl)}, fees paid ${usd(r.fees)}.${ref ? " Trade on Strike: " + ref : ""}`;
+    if (!r || !v) return;
+    const text = `Scout says this Strike wallet is "${type}" (${v.label}). ${r.trades} fills, realized PnL ${usd(r.pnl)} in this sample.${ref ? " Trade on Strike: " + ref : ""}`;
     try { await navigator.clipboard.writeText(text); setCopied(true); } catch {}
   }
 
-  const c = r?.curve ?? [];
-  const lo = c.length ? Math.min(...c) : 0;
-  const span = (c.length ? Math.max(...c) : 0) - lo || 1;
-  const pts = c.length > 1 ? c.map((v, i) => `${(i / (c.length - 1)) * 320},${110 - ((v - lo) / span) * 100}`).join(" ") : "";
-  const stats = r ? [
-    ["Realized PnL (sample)", usd(r.pnl), r.pnl >= 0 ? "text-emerald-400" : "text-red-400"],
-    ["Win rate", r.winRate === null ? "n/a" : Math.round(r.winRate * 100) + "%", ""],
-    ["Biggest profit drop", r.maxDD === null ? "n/a" : usd(r.maxDD), "text-amber-400"],
-    ["Liquidations", String(r.liqs), r.liqs > 0 ? "text-red-400" : ""],
-    ["Fees paid", usd(r.fees), ""],
-    
-["Fills per day", r.spanDays > 0 ? Math.round(r.trades / Math.max(r.spanDays, 1 / 24)).toLocaleString() : "n/a", ""],
-  ] : [];
+  let winner = "";
+  if (pair) {
+    const sa = copyScore(pair[0]);
+    const sb = copyScore(pair[1]);
+    winner = Math.abs(sa - sb) < 5
+      ? `Too close to call: ${sa} vs ${sb} on copyability.`
+      : `Easier to copy: wallet ${sa > sb ? "A" : "B"} (${Math.max(sa, sb)} vs ${Math.min(sa, sb)} on copyability).`;
+  }
 
   return (
-    <main className="min-h-screen bg-[#0B0F10] text-[#E8F1EE]">
-      <div className="mx-auto w-full max-w-6xl p-5 md:p-8">
-        <div className="text-2xl font-extrabold">Scout</div>
-        <h1 className="mt-6 text-3xl font-extrabold md:text-4xl">Paste a Strike wallet. See how it really trades.</h1>
-        <p className="mt-2 max-w-2xl text-[#8DA09A]">Real fills, real fees, plain-English red flags. Wallet address or account ID.</p>
-
-        <div className={`${card} mt-6 flex flex-col gap-3`}>
-          <label htmlFor="addr" className="text-sm text-[#8DA09A]">Wallet address or account ID</label>
-          <div className="flex flex-col gap-3 md:flex-row">
-            <input id="addr" value={addr} onChange={(e) => setAddr(e.target.value)} onKeyDown={(e) => e.key === "Enter" && analyze()}
-              placeholder="addr1… / 0x… / account ID"
-              className="h-12 flex-1 rounded-xl border border-[#2A383C] bg-[#0B0F10] px-4" />
-            <button onClick={analyze} disabled={busy}
-              className="h-12 rounded-xl bg-emerald-400 px-6 font-extrabold text-[#04120C] disabled:opacity-60">{busy ? "Analyzing…" : "Analyze"}</button>
-            <button onClick={() => { setErr(""); setCopied(false); setR(DEMO); }}
-              className="h-12 rounded-xl border border-[#2A383C] px-6 font-bold">Try demo</button>
+    <main className="min-h-screen">
+      <div className="mx-auto w-full max-w-6xl px-5 py-6 md:px-8">
+        <header className="flex items-center justify-between">
+          <div className="flex items-center gap-2 text-xl font-bold">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#C6FF4D" strokeWidth="2.2" aria-hidden="true"><circle cx="12" cy="12" r="7.5"></circle><path d="M12 2v5M12 17v5M2 12h5M17 12h5"></path></svg>
+            Scout
           </div>
-          <label htmlFor="ref" className="mt-1 text-sm text-[#8DA09A]">Your Strike referral link (optional, added to the share text)</label>
-          <input id="ref" value={ref} onChange={(e) => setRef(e.target.value)} placeholder="https://app.strikefinance.org/…"
-            className="h-12 rounded-xl border border-[#2A383C] bg-[#0B0F10] px-4" />
-          {err && <p role="alert" className="text-sm text-red-400">{err}</p>}
-        </div>
+          <span className="num muted text-xs">built on Strike data</span>
+        </header>
 
-        {r && (
-          <div className="mt-6 grid gap-5 lg:grid-cols-3">
-            <div className="flex flex-col gap-5 lg:col-span-2">
-              {r.sample && <p className="text-xs text-[#8DA09A]">Sample data</p>}
-              <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
-                {stats.map(([label, value, color]) => (
-                  <div key={label} className={card}>
-                    <div className="text-xs text-[#8DA09A]">{label}</div>
-                    <div className={`text-2xl font-extrabold ${color}`}>{value}</div>
-                  </div>
-                ))}
+        <section className="mt-10 md:mt-16">
+          <nav className="flex gap-2" aria-label="Mode">
+            <button className="tab" aria-pressed={mode === "scan"} onClick={() => switchMode("scan")}>Scan a wallet</button>
+            <button className="tab" aria-pressed={mode === "compare"} onClick={() => switchMode("compare")}>Compare two</button>
+          </nav>
+
+          {mode === "scan" ? (
+            <>
+              <h1 className="rise mt-6 max-w-3xl text-4xl font-bold leading-[1.05] tracking-tight md:text-6xl">
+                Know who you’re copying <span className="acid">before you copy.</span>
+              </h1>
+              <p className="rise muted mt-4 max-w-xl text-base md:text-lg">
+                Paste any Strike wallet. Scout reads the real fills and shows how it trades, what it costs, and whether you could actually copy it.
+              </p>
+              <div className="panel rise mt-8 p-4 md:p-5">
+                <label htmlFor="addr" className="sr-only">Wallet address or account ID</label>
+                <div className="flex flex-col gap-3 md:flex-row">
+                  <input id="addr" className="field num flex-1" value={addr} onChange={(e) => setAddr(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && analyze()} placeholder="addr1… / 0x… / account ID" />
+                  <button className="btn btn-acid" onClick={() => analyze()} disabled={busy}>{busy ? "Scanning…" : "Scan wallet"}</button>
+                </div>
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <span className="label">Try</span>
+                  {EXAMPLES.map(([name, a]) => (
+                    <button key={a} className="chip" onClick={() => { setAddr(a); analyze(a); }}>{name}</button>
+                  ))}
+                  <button className="chip" onClick={() => { setErr(""); setCopied(false); setR(DEMO); }}>Demo data</button>
+                </div>
+                <details className="mt-3">
+                  <summary className="muted cursor-pointer text-sm">Add your referral link to the share text</summary>
+                  <label htmlFor="ref" className="sr-only">Referral link</label>
+                  <input id="ref" className="field mt-2" value={ref} onChange={(e) => setRef(e.target.value)} placeholder="https://app.strikefinance.org/…" />
+                </details>
+                {err && <p role="alert" className="bad mt-3 text-sm">{err}</p>}
               </div>
-              {pts && (
-                <div className={card}>
-                  <div className="mb-3 text-sm text-[#8DA09A]">Profit over time (Strike portfolio history)</div>
-                  <svg viewBox="0 0 320 120" preserveAspectRatio="none" className="h-56 w-full" role="img" aria-label="Profit over time">
-                    <polyline points={pts} fill="none" stroke="#2EE6A6" strokeWidth="3" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
-                  </svg>
+            </>
+          ) : (
+            <>
+              <h1 className="rise mt-6 max-w-3xl text-4xl font-bold leading-[1.05] tracking-tight md:text-6xl">
+                Two wallets. <span className="acid">One honest verdict.</span>
+              </h1>
+              <p className="rise muted mt-4 max-w-xl text-base md:text-lg">
+                Put two Strike traders side by side and see which one is actually easier to copy.
+              </p>
+              <div className="panel rise mt-8 p-4 md:p-5">
+                <div className="grid gap-3 md:grid-cols-2">
+                  <div>
+                    <label htmlFor="ca" className="label">Wallet A</label>
+                    <input id="ca" className="field num mt-1" value={ca} onChange={(e) => setCa(e.target.value)} placeholder="addr1… / 0x… / account ID" />
+                  </div>
+                  <div>
+                    <label htmlFor="cb" className="label">Wallet B</label>
+                    <input id="cb" className="field num mt-1" value={cb} onChange={(e) => setCb(e.target.value)} placeholder="addr1… / 0x… / account ID" />
+                  </div>
+                </div>
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <button className="btn btn-acid" onClick={() => compare()} disabled={busy}>{busy ? "Comparing…" : "Compare wallets"}</button>
+                  <button className="chip" onClick={() => { setCa(EXAMPLES[0][1]); setCb(EXAMPLES[1][1]); compare(EXAMPLES[0][1], EXAMPLES[1][1]); }}>Try two examples</button>
+                  <button className="chip" onClick={() => { setErr(""); setPair([DEMO, DEMO_B]); }}>Demo pair</button>
+                </div>
+                {err && <p role="alert" className="bad mt-3 text-sm">{err}</p>}
+              </div>
+            </>
+          )}
+        </section>
+
+        {busy && (
+          <div className="mt-8 grid gap-4 md:grid-cols-3" aria-live="polite">
+            <p className="label md:col-span-3">Scouting… reading fills and portfolio history</p>
+            {[0, 1, 2].map((i) => <div key={i} className="panel sweep h-32"></div>)}
+          </div>
+        )}
+
+        {mode === "compare" && pair && !busy && (
+          <div className="mt-8 flex flex-col gap-5">
+            <div className="panel rise p-5 text-lg font-bold" style={{ borderColor: "var(--acid)" }}>{winner}</div>
+            <div className="grid gap-5 md:grid-cols-2">
+              <Side tag="Wallet A" r={pair[0]} />
+              <Side tag="Wallet B" r={pair[1]} />
+            </div>
+            <p className="muted text-[11px]">Copyability is Scout’s estimate from recent fills only. It shows data, not financial advice.</p>
+          </div>
+        )}
+
+        {mode === "scan" && r && v && !busy && (
+          <div className="mt-8 grid gap-5 lg:grid-cols-3">
+            <div className="flex flex-col gap-5 lg:col-span-2">
+              <div id="t-verdict" className="panel rise p-6 md:p-8" style={{ background: "linear-gradient(135deg, #131b18, #0e1412)" }}>
+                <div className="flex flex-col gap-6 md:flex-row md:items-end md:justify-between">
+                  <div>
+                    <p className="label">Trader type{r.sample ? " · sample data" : ""}</p>
+                    <h2 className="mt-2 text-4xl font-bold tracking-tight md:text-5xl">{type}</h2>
+                    <p className="muted mt-2 max-w-md">{tagline}</p>
+                  </div>
+                  <div className="md:text-right">
+                    <p className="label">Scout verdict</p>
+                    <p className={`mt-1 text-xl font-bold ${v.tone}`}>{v.label}</p>
+                  </div>
+                </div>
+                <div className="mt-6 grid grid-cols-3 gap-4 pt-5" style={{ borderTop: "1px solid var(--line)" }}>
+                  <Stat label="Realized PnL (sample)" value={usd(r.pnl)} cls={r.pnl >= 0 ? "acid" : "bad"} />
+                  <Stat label="Fills per day" value={r.perDay ? Math.round(r.perDay).toLocaleString() : "n/a"} />
+                  <Stat label="Avg leverage" value={r.avgLev ? r.avgLev.toFixed(1) + "x" : "n/a"} />
+                </div>
+              </div>
+
+              <div id="t-stats" className="grid grid-cols-2 gap-4 md:grid-cols-4">
+                <div className="panel p-5"><Stat label="Win rate" value={r.winRate === null ? "n/a" : Math.round(r.winRate * 100) + "%"} /></div>
+                <div className="panel p-5"><Stat label="Biggest profit drop" value={r.maxDD === null ? "n/a" : usd(r.maxDD)} cls="warn" /></div>
+                <div className="panel p-5"><Stat label="Liquidations" value={String(r.liqs)} cls={r.liqs > 0 ? "bad" : ""} /></div>
+                <div className="panel p-5"><Stat label="Fees paid" value={usd(r.fees)} /></div>
+              </div>
+
+              {r.curve.length > 1 && (
+                <div id="t-chart" className="panel rise p-5">
+                  <p className="label mb-3">Profit over time (Strike portfolio history)</p>
+                  <Spark curve={r.curve} h="h-56 md:h-72" fill />
                 </div>
               )}
+
               <div className="flex flex-col gap-3">
-                <div className="text-lg font-extrabold">What Scout noticed</div>
+                <h3 className="text-lg font-bold">What Scout noticed</h3>
                 {r.insights.map((i) => (
-                  <div key={i.title} className={`${card} ${i.tone === "warn" ? "border-amber-400/60" : "border-emerald-400/60"}`}>
+                  <div key={i.title} className="panel rise p-5" style={{ borderLeft: `3px solid var(${i.tone === "warn" ? "--warn" : "--acid"})` }}>
                     <div className="font-bold">{i.title}</div>
-                    <div className="mt-1 text-sm text-[#8DA09A]">{i.body}</div>
+                    <div className="muted mt-1 text-sm">{i.body}</div>
                   </div>
                 ))}
               </div>
             </div>
+
             <div className="flex flex-col gap-5">
-              <div className={`${card} flex flex-col gap-2 border-emerald-400`}>
-                <div className="text-lg font-extrabold">Fee saver</div>
-                <div className="text-sm text-[#8DA09A]">Fees paid in this sample: {usd(r.fees)}</div>
-                <div className="text-sm text-[#8DA09A]">Taker orders: {Math.round(r.takerPct * 100)}% of fills</div>
-                <div className="text-sm text-[#8DA09A]">Maker rebates earned: {usd(r.rebates)}</div>
-                <div className="mt-2 text-xs text-[#8DA09A]">Estimated saving if 25% of taker orders were maker orders</div>
-                <div className="text-3xl font-extrabold text-emerald-400">{usd(r.savings)}</div>
+              <div id="t-fee" className="panel rise flex flex-col gap-2 p-5" style={{ borderColor: "var(--acid)" }}>
+                <h3 className="text-lg font-bold">Fee saver</h3>
+                <p className="muted text-sm">Fees paid in this sample: <span className="num">{usd(r.fees)}</span></p>
+                <p className="muted text-sm">Taker orders: <span className="num">{Math.round(r.takerPct * 100)}%</span> of fills</p>
+                <p className="muted text-sm">Maker rebates earned: <span className="num">{usd(r.rebates)}</span></p>
+                <p className="label mt-3">If 25% of taker orders were maker orders</p>
+                <p className="num acid text-3xl font-semibold">{usd(r.savings)}</p>
               </div>
-              <div className={`${card} text-sm text-[#8DA09A]`}>
+              <div className="panel muted p-5 text-sm">
                 Based on the latest {r.trades.toLocaleString()} fills{r.spanDays > 0 ? `, covering about ${r.spanDays < 1 ? "less than a day" : Math.round(r.spanDays) + " days"}` : ""}.
               </div>
-              <button onClick={share} className="h-12 rounded-xl bg-emerald-400 font-extrabold text-[#04120C]">{copied ? "Copied!" : "Copy share text"}</button>
-              <p className="text-[11px] text-[#8DA09A]">Estimates are based on recent fills only. Scout shows data, not financial advice.</p>
+              <button className="btn btn-acid w-full" onClick={share}>{copied ? "Copied!" : "Copy share text"}</button>
+              <button className="chip" onClick={() => setTour(0)}>Replay the tour</button>
+              <p className="muted text-[11px]">Estimates use recent fills only. Scout shows data, not financial advice.</p>
             </div>
           </div>
         )}
       </div>
+
+      {tour >= 0 && mode === "scan" && (
+        <div role="dialog" aria-label="Scout tour" className="panel fixed bottom-4 left-1/2 z-50 w-[min(92vw,420px)] -translate-x-1/2 p-5 shadow-2xl" style={{ borderColor: "var(--acid)" }}>
+          <p className="label">Step {tour + 1} of {STEPS.length}</p>
+          <p className="mt-1 font-bold">{STEPS[tour].title}</p>
+          <p className="muted mt-1 text-sm">{STEPS[tour].body}</p>
+          <div className="mt-4 flex gap-3">
+            <button className="btn btn-acid flex-1" onClick={() => (tour >= STEPS.length - 1 ? endTour() : setTour(tour + 1))}>
+              {tour >= STEPS.length - 1 ? "Done" : "Next"}
+            </button>
+            <button className="chip" onClick={endTour}>Skip</button>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
