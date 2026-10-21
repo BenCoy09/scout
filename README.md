@@ -18,6 +18,8 @@ Paste a wallet address (Cardano, Ethereum or Solana) or an account ID. Scout sho
 - **Fee saver:** a rough estimate of what more limit orders could save, with its assumptions shown
 - **Copy estimate:** a rough "if you copied with $X" result for the sampled fills, with assumptions shown
 - **Compare mode:** two wallets side by side with a "which is easier to copy" line
+- **Scout Board:** save wallets in your browser and see them ranked by copyability (the saved list stays on your device)
+- **Bot detection with visible signals:** fills per day, typical gap between fills, repeated trade sizes, and round-the-clock trading, listed on the card so the verdict is checkable
 - **Scorecard image** and share text, with an optional referral link
 - A short guided tour and "what’s this?" tips for beginners
 
@@ -51,4 +53,4 @@ Open http://localhost:3000. Stack: Next.js, TypeScript, Tailwind, deployed on Ve
 
 ## Roadmap
 
-Watchlist and alerts, copyability score history, multi-wallet portfolio view, better bot detection, builder-code monetization, a leaderboard of the most copyable wallets.
+Alerts, copyability score history, builder-code monetization, and a leaderboard of the most copyable wallets across all of Strike.

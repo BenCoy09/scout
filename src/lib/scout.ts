@@ -4,7 +4,7 @@ export type Report = {
   sample: boolean; pnl: number; fees: number; takerFees: number; rebates: number; savings: number; savingsPct: number;
   winRate: number | null; closed: number; liqs: number; avgLev: number; trades: number; spanDays: number; perDay: number;
   takerPct: number; maxDD: number | null; maxDDPct: number | null; curve: number[]; insights: Insight[];
-  funding: number | null; notional: number; equity: number;
+  funding: number | null; notional: number; equity: number; bot: boolean; addr?: string;
 };
 
 export const n = (v: any) => { const x = parseFloat(v); return Number.isFinite(x) ? x : 0; };
@@ -66,9 +66,29 @@ export function buildReport(pf: any, fr: any, fu: any): Report {
       if (next && next.timestamp - fills[i].timestamp < 300000) revenge++;
     }
   }
+
+  const gaps: number[] = [];
+  for (let i = 1; i < fills.length; i++) gaps.push((fills[i].timestamp - fills[i - 1].timestamp) / 1000);
+  gaps.sort((a, b) => a - b);
+  const medGap = gaps.length ? gaps[Math.floor(gaps.length / 2)] : 0;
+  const sizeCounts = new Map<string, number>();
+  for (const f of fills) sizeCounts.set(String(f.size), (sizeCounts.get(String(f.size)) ?? 0) + 1);
+  const topSizeShare = fills.length ? Math.max(0, ...Array.from(sizeCounts.values())) / fills.length : 0;
+  const hourCounts = new Array(24).fill(0);
+  for (const f of fills) hourCounts[new Date(f.timestamp).getUTCHours()]++;
+  const minHourShare = fills.length ? Math.min(...hourCounts) / fills.length : 0;
+  const sig: string[] = [];
+  const fast = fills.length >= 500 && perDay > 300;
+  if (fast) sig.push(`${Math.round(perDay).toLocaleString()} fills per day`);
+  let soft = 0;
+  if (fills.length >= 200 && medGap < 2) { soft++; sig.push(`the typical gap between fills is only ${medGap.toFixed(1)} seconds`); }
+  if (fills.length >= 200 && topSizeShare > 0.3) { soft++; sig.push(`${Math.round(topSizeShare * 100)}% of fills use the exact same size`); }
+  if (fills.length >= 200 && spanDays >= 3 && minHourShare >= 0.02) { soft++; sig.push("it trades in every hour of the day, with no quiet hours"); }
+  const bot = fast || soft >= 2;
+
   const insights: Insight[] = [];
-  if (fills.length >= 500 && perDay > 300)
-    insights.push({ tone: "warn", title: "Looks like a bot or high-frequency trader", body: `About ${Math.round(perDay).toLocaleString()} fills per day in this sample. Copying a wallet like this is usually not realistic, because your copies would arrive after the trades.` });
+  if (bot)
+    insights.push({ tone: "warn", title: "Looks like a bot or high-frequency trader", body: `Signals: ${sig.join("; ")}. Copying a wallet like this is usually not realistic, because your copies would arrive after the trades.` });
   if (fees > 0 && takerFees / fees > 0.6)
     insights.push({ tone: "warn", title: "Most fees are taker fees", body: `About ${Math.round((takerFees / fees) * 100)}% of fees come from taker orders. Using limit orders more often could save roughly ${usd(savings)} (estimate).` });
   if (revenge >= 3)
@@ -87,12 +107,12 @@ export function buildReport(pf: any, fr: any, fu: any): Report {
     liqs, avgLev: avg(levs), trades: fills.length, spanDays, perDay, takerPct,
     maxDD: curve.length > 1 ? dd : null,
     maxDDPct: curve.length > 1 && peakVal > 0 ? -dd / peakVal : null,
-    curve, insights, funding, notional, equity,
+    curve, insights, funding, notional, equity, bot,
   };
 }
 
 export function archetype(r: Report): [string, string, string] {
-  if (r.trades >= 500 && r.perDay > 300) return ["The Machine", "Fills faster than a human can click. Copying it is not realistic.", "Nice catch. You just spotted a machine."];
+  if (r.bot) return ["The Machine", "Trades like software, not like a person. Copying it is not realistic.", "Nice catch. You just spotted a machine."];
   if (r.liqs > 0 || r.avgLev >= 20) return ["The Degen", "High leverage, high drama. Fun to watch, risky to follow.", "Now you know exactly what you’re looking at."];
   if (r.takerPct < 0.35 && r.trades > 20) return ["The Market Maker", "Mostly resting orders. Patient and fee-smart.", "A patient one. Good find."];
   if ((r.winRate ?? 0) >= 0.6 && r.avgLev < 10) return ["The Sniper", "Picks its spots, wins often, keeps leverage moderate.", "A sharp one. Worth a closer look."];
@@ -100,14 +120,16 @@ export function archetype(r: Report): [string, string, string] {
 }
 
 export function verdict(r: Report): { label: string; tone: "bad" | "warn" | "acid" } {
-  if (r.insights.some((i) => i.title.startsWith("Looks like a bot"))) return { label: "Hard to copy", tone: "bad" };
+  if (r.bot) return { label: "Hard to copy", tone: "bad" };
   if (r.insights.some((i) => i.tone === "warn")) return { label: "Proceed with care", tone: "warn" };
   return { label: "No red flags in this sample", tone: "acid" };
 }
 
 export function why(r: Report): string {
-  if (r.insights.some((i) => i.title.startsWith("Looks like a bot")))
-    return `${Math.round(r.perDay).toLocaleString()} fills a day is faster than a person can follow, so your copies would land after the price has moved.`;
+  if (r.bot) {
+    const b = r.insights.find((i) => i.title.startsWith("Looks like a bot"));
+    return b ? b.body : "This wallet trades like software, so your copies would land after the price has moved.";
+  }
   const lev = `${r.avgLev.toFixed(1)}x average leverage and ${r.liqs} liquidation${r.liqs === 1 ? "" : "s"}`;
   const warn = r.insights.find((i) => i.tone === "warn");
   if (warn) return `Worth a closer look: ${warn.title.toLowerCase()}. This sample shows ${lev}.`;
@@ -116,8 +138,7 @@ export function why(r: Report): string {
 
 export function copyScore(r: Report): number {
   let s = 100;
-  const bot = r.insights.some((i) => i.title.startsWith("Looks like a bot"));
-  if (bot) s -= 50; else if (r.perDay > 100) s -= 15;
+  if (r.bot) s -= 50; else if (r.perDay > 100) s -= 15;
   if (r.avgLev > 10) s -= Math.min((r.avgLev - 10) * 1.5, 20);
   if (r.liqs > 0) s -= 15;
   s -= r.insights.filter((i) => i.tone === "warn" && !i.title.startsWith("Looks like a bot")).length * 5;
@@ -138,7 +159,7 @@ export const DEMO: Report = {
   sample: true, pnl: 1840.5, fees: 412.3, takerFees: 301.2, rebates: 22.4, savings: 38.6, savingsPct: 60,
   winRate: 0.61, closed: 90, liqs: 0, avgLev: 6.4, trades: 142, spanDays: 21, perDay: 7, takerPct: 0.7,
   maxDD: -240, maxDDPct: 0.24, curve: [0, 40, 120, 5, 90, 210, 180, 330, 420, 500],
-  funding: -18.4, notional: 210000, equity: 3200,
+  funding: -18.4, notional: 210000, equity: 3200, bot: false,
   insights: [
     { tone: "warn", title: "Most fees are taker fees", body: "About 73% of fees come from taker orders. Using limit orders more often could save roughly $38.60 (estimate)." },
     { tone: "warn", title: "Possible revenge trades", body: "4 times a new trade opened within 5 minutes of a losing close. Pausing after a loss may help." },
@@ -149,9 +170,9 @@ export const DEMO_B: Report = {
   sample: true, pnl: 159.47, fees: 85.64, takerFees: 85.64, rebates: 0, savings: 25.2, savingsPct: 60,
   winRate: 0.52, closed: 700, liqs: 0, avgLev: 3.2, trades: 1000, spanDays: 0.12, perDay: 8400, takerPct: 1,
   maxDD: -1995.9, maxDDPct: 0.05, curve: [0, 300, 900, 1500, 1700, 1750, 1800, 1790, 1820, 1850],
-  funding: 2.1, notional: 4200000, equity: 43000,
+  funding: 2.1, notional: 4200000, equity: 43000, bot: true,
   insights: [
-    { tone: "warn", title: "Looks like a bot or high-frequency trader", body: "About 8,400 fills per day in this sample. Copying a wallet like this is usually not realistic, because your copies would arrive after the trades." },
+    { tone: "warn", title: "Looks like a bot or high-frequency trader", body: "Signals: 8,400 fills per day. Copying a wallet like this is usually not realistic, because your copies would arrive after the trades." },
   ],
 };
 
@@ -173,5 +194,6 @@ export async function load(addr: string): Promise<Report> {
   const [pf, fr, fu] = await Promise.all([get("portfolio"), get("fills"), get("funding").catch(() => null)]);
   const rep = buildReport(pf, fr, fu);
   if (rep.trades === 0) throw new Error("This wallet exists but has no trades yet, so there is nothing to scan.");
+  rep.addr = addr;
   return rep;
 }

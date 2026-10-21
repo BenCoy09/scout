@@ -1,6 +1,8 @@
 "use client";
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { DEMO, DEMO_B, EXAMPLES, archetype, checkInput, copyScore, load, simulate, usd, verdict, why, type Report } from "@/lib/scout";
+import { saveReport } from "@/lib/watch";
 
 const STEPS = [
   { id: "t-verdict", title: "Trader type and verdict", body: "Scout reads the real fills and gives a plain-English type, a verdict, and one line explaining why." },
@@ -143,6 +145,7 @@ export default function Home() {
   const [err, setErr] = useState("");
   const [copied, setCopied] = useState(false);
   const [tour, setTour] = useState(-1);
+  const [savedAddr, setSavedAddr] = useState("");
 
   useEffect(() => {
     document.querySelectorAll(".tour-ring").forEach((e) => e.classList.remove("tour-ring"));
@@ -216,7 +219,10 @@ export default function Home() {
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#C6FF4D" strokeWidth="2.2" aria-hidden="true"><circle cx="12" cy="12" r="7.5"></circle><path d="M12 2v5M12 17v5M2 12h5M17 12h5"></path></svg>
             Scout
           </div>
-          <span className="num muted text-xs">built on Strike data</span>
+          <div className="flex items-center gap-3">
+            <Link href="/board" className="chip inline-flex items-center">Scout Board</Link>
+            <span className="num muted hidden text-xs sm:inline">built on Strike data</span>
+          </div>
         </header>
 
         <section className="mt-10 md:mt-16">
@@ -371,6 +377,13 @@ export default function Home() {
                 Based on the latest {r.trades.toLocaleString()} fills{r.spanDays > 0 ? `, covering about ${r.spanDays < 1 ? "less than a day" : Math.round(r.spanDays) + " days"}` : ""}.
               </div>
               <button className="btn btn-acid w-full" onClick={share}>{copied ? "Copied!" : "Copy share text"}</button>
+              {r.addr && !r.sample && (
+                <button className="btn w-full" style={{ border: "1px solid var(--line)" }}
+                  onClick={() => { saveReport(r); setSavedAddr(r.addr ?? ""); }}>
+                  {savedAddr === r.addr ? "Saved to Scout Board" : "Save to Scout Board"}
+                </button>
+              )}
+              {savedAddr === r.addr && r.addr && <Link href="/board" className="chip inline-flex items-center justify-center">Open Scout Board</Link>}
               <button className="btn w-full" style={{ border: "1px solid var(--line)" }} onClick={() => downloadCard(r, type, v.label, score, ref)}>Download scorecard image</button>
               <button className="chip" onClick={() => setTour(0)}>Replay the tour</button>
               <p className="muted text-[11px]">Estimates use recent fills only. Scout shows data, not financial advice.</p>
