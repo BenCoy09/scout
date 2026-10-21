@@ -1,36 +1,54 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Scout
 
-## Getting Started
+**Know who you’re copying before you copy.** Scout scans any Strike wallet and tells you how it really trades, what it costs, and whether you could realistically copy it.
 
-First, run the development server:
+Live app: https://scout-six-swart.vercel.app
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+## The problem
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Strike’s leaderboard ranks traders by profit. It doesn’t tell you whether you can actually copy them. Some top wallets make hundreds of thousands of trades, so your copies would arrive after the price has moved. Profit alone is not a safe reason to copy someone.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## What Scout does
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Paste a wallet address (Cardano, Ethereum or Solana) or an account ID. Scout shows:
 
-## Learn More
+- **Trader type and verdict**, with one plain-English line explaining why
+- **Copyability score (0 to 100)**, lowered by bot-like speed, high leverage, liquidations and other warnings
+- **Key numbers:** win rate (after fees), biggest profit drop, liquidations, fees, net funding, fills per day, average leverage
+- **Fee saver:** a rough estimate of what more limit orders could save, with its assumptions shown
+- **Copy estimate:** a rough "if you copied with $X" result for the sampled fills, with assumptions shown
+- **Compare mode:** two wallets side by side with a "which is easier to copy" line
+- **Scorecard image** and share text, with an optional referral link
+- A short guided tour and "what’s this?" tips for beginners
 
-To learn more about Next.js, take a look at the following resources:
+## How Scout uses Strike
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Scout reads public data from Strike’s REST API (api.strikefinance.org), selected by wallet address or account ID. Calls go through a small server route (/api/strike) so the browser is never blocked.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+| Endpoint | Used for |
+| --- | --- |
+| /v2/history/fill | Latest 1,000 fills: PnL, fees, maker/taker, leverage, liquidations, trading pace |
+| /v2/portfolio | Profit history, account value, fee tier |
+| /v2/history/funding | Net funding paid or received |
 
-## Deploy on Vercel
+Scout never asks for keys or trading access. It only reads public data.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Honest limits
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- Most numbers come from the **latest 1,000 fills**, which can cover less than a day for very active wallets.
+- Fee saver and copy estimate are **estimates**. Their assumptions are shown on screen, including a guessed delay cost that is not measured.
+- Funding covers the latest 1,000 funding payments.
+- Scout shows data, not financial advice.
+
+## Run it locally
+
+    git clone https://github.com/BenCoy09/scout
+    cd scout
+    npm install
+    npm run dev
+
+Open http://localhost:3000. Stack: Next.js, TypeScript, Tailwind, deployed on Vercel.
+
+## Roadmap
+
+Watchlist and alerts, copyability score history, multi-wallet portfolio view, better bot detection, builder-code monetization, a leaderboard of the most copyable wallets.
