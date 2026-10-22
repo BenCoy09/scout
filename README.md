@@ -13,7 +13,7 @@ Strike’s leaderboard ranks traders by profit. It doesn’t tell you whether yo
 Paste a wallet address (Cardano, Ethereum or Solana) or an account ID. Scout shows:
 
 - **Trader type and verdict**, with one plain-English line explaining why
-- **Copyability score (0 to 100)**, lowered by bot-like speed, high leverage, liquidations and other warnings
+- **Copyability score (0 to 100)**, lowered by bot-like speed, high leverage, liquidations, big drops from the peak and other warnings
 - **Key numbers:** win rate (after fees), biggest profit drop, liquidations, fees, net funding, fills per day, average leverage
 - **Fee saver:** a rough estimate of what more limit orders could save, with its assumptions shown
 - **Copy estimate:** a rough "if you copied with $X" result for the sampled fills, with assumptions shown

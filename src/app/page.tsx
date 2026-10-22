@@ -28,7 +28,7 @@ function Stat({ label, value, cls = "", tip, sub }: { label: string; value: stri
   return (
     <div className="min-w-0">
       <div className="label">{label}{tip && <Tip text={tip} />}</div>
-      <div className={`num mt-1 text-2xl font-semibold ${cls}`}>{value}</div>
+      <div className={`num mt-1 font-semibold sm:text-2xl ${value.length > 11 ? "text-base" : value.length > 8 ? "text-lg" : "text-2xl"} ${cls}`}>{value}</div>
       {sub && <div className="muted mt-0.5 text-xs">{sub}</div>}
     </div>
   );
@@ -96,8 +96,10 @@ function downloadCard(r: Report, type: string, v: string, score: number, ref: st
   x.fillStyle = "#e9f2ee"; x.font = "bold 44px sans-serif"; x.fillText(v, 80, 790);
   x.fillStyle = "#8a9c95"; x.font = "28px sans-serif";
   x.fillText(`${Math.round(r.perDay).toLocaleString()} fills/day  |  ${r.avgLev.toFixed(1)}x avg leverage`, 80, 850);
-  x.fillText(ref ? `Trade on Strike: ${ref}`.slice(0, 60) : "scout-six-swart.vercel.app", 80, 980);
-  x.fillText("Data, not financial advice.", 80, 1020);
+  x.fillStyle = "#e9f2ee"; x.font = "bold 30px sans-serif"; x.fillText("scout-six-swart.vercel.app", 80, 955);
+  x.fillStyle = "#8a9c95"; x.font = "26px sans-serif";
+  if (ref) x.fillText(`Trade on Strike: ${ref}`.slice(0, 64), 80, 995);
+  x.fillText("Data, not financial advice.", 80, 1040);
   c.toBlob((b) => {
     if (!b) return;
     const a = document.createElement("a");
@@ -121,7 +123,7 @@ function Side({ tag, r }: { tag: string; r: Report }) {
       <p className={`font-bold ${v.tone}`}>{v.label}</p>
       <p className="muted text-sm">{why(r)}</p>
       <div className="grid grid-cols-2 gap-4 pt-4" style={{ borderTop: "1px solid var(--line)" }}>
-        <Stat label="Copyability" value={sc + "/100"} cls={sc >= 70 ? "acid" : sc >= 40 ? "warn" : "bad"} tip="How realistic this wallet is to copy, from 0 to 100. Fast bots, high leverage and liquidations lower it." />
+        <Stat label="Copyability" value={sc + "/100"} cls={sc >= 70 ? "acid" : sc >= 40 ? "warn" : "bad"} tip="How realistic this wallet is to copy, from 0 to 100. Fast bots, high leverage, liquidations and big drops lower it." />
         <Stat label="Fills per day" value={r.perDay ? Math.round(r.perDay).toLocaleString() : "n/a"} />
         <Stat label="Avg leverage" value={r.avgLev ? r.avgLev.toFixed(1) + "x" : "n/a"} tip="Leverage multiplies gains and losses. 10x means a 10% move against you wipes the position." />
         <Stat label="Win rate" value={r.winRate === null ? "n/a" : Math.round(r.winRate * 100) + "%"} />
@@ -198,7 +200,7 @@ export default function Home() {
 
   async function share() {
     if (!r || !v) return;
-    const text = `Scout says this Strike wallet is "${type}" (${v.label}, copyability ${score}/100).${r.sample ? " Sample data." : ""}${ref ? " Trade on Strike: " + ref : ""}`;
+    const text = `Scout says this Strike wallet is "${type}" (${v.label}, copyability ${score}/100).${r.sample ? " Sample data." : ""} Scan any Strike wallet: https://scout-six-swart.vercel.app${ref ? " Trade on Strike: " + ref : ""}`;
     try { await navigator.clipboard.writeText(text); setCopied(true); } catch {}
   }
 
@@ -327,7 +329,7 @@ export default function Home() {
                 <p className="mt-5 text-sm"><span className="label mr-2">Scout verdict</span><span className={`text-lg font-bold ${v.tone}`}>{v.label}</span></p>
                 <p className="muted mt-1 max-w-xl text-sm">{why(r)}</p>
                 <div className="mt-6 grid grid-cols-1 gap-5 pt-5 sm:grid-cols-3" style={{ borderTop: "1px solid var(--line)" }}>
-                  <Stat label="Copyability" value={score + "/100"} cls={score >= 70 ? "acid" : score >= 40 ? "warn" : "bad"} tip="How realistic this wallet is to copy, from 0 to 100. Fast bots, high leverage and liquidations lower it." />
+                  <Stat label="Copyability" value={score + "/100"} cls={score >= 70 ? "acid" : score >= 40 ? "warn" : "bad"} tip="How realistic this wallet is to copy, from 0 to 100. Fast bots, high leverage, liquidations and big drops lower it." />
                   <Stat label="Fills per day" value={r.perDay ? Math.round(r.perDay).toLocaleString() : "n/a"} tip="How many trades it makes per day. Hundreds a day means a person can’t follow it." />
                   <Stat label="Avg leverage" value={r.avgLev ? r.avgLev.toFixed(1) + "x" : "n/a"} tip="Leverage multiplies gains and losses. 10x means a 10% move against you wipes the position." />
                 </div>
@@ -369,7 +371,7 @@ export default function Home() {
                 <p className="label mt-2">Possible saving</p>
                 <p className="num acid text-3xl font-semibold">{usd(r.savings)}</p>
                 <p className="muted text-[11px]">
-                  Assumes 25% of taker fills become maker fills. Saving = taker fees ({usd(r.takerFees)}) x 25% x the maker discount on this wallet’s fee tier ({r.savingsPct}% cheaper than taker).
+                  Assumes 25% of taker fills become maker fills. Saving = taker fees ({usd(r.takerFees)}) x 25% x the maker discount on this wallet’s fee tier ({r.savingsPct >= 100 ? "maker fills pay nothing or earn a rebate" : r.savingsPct + "% cheaper than taker"}).
                 </p>
               </div>
               <Sim r={r} />

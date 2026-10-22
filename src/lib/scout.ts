@@ -141,6 +141,7 @@ export function copyScore(r: Report): number {
   if (r.bot) s -= 50; else if (r.perDay > 100) s -= 15;
   if (r.avgLev > 10) s -= Math.min((r.avgLev - 10) * 1.5, 20);
   if (r.liqs > 0) s -= 15;
+  if (r.maxDDPct !== null) { if (r.maxDDPct > 0.5) s -= 15; else if (r.maxDDPct > 0.3) s -= 8; }
   s -= r.insights.filter((i) => i.tone === "warn" && !i.title.startsWith("Looks like a bot")).length * 5;
   return Math.max(0, Math.min(100, Math.round(s)));
 }
